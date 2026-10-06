@@ -7,6 +7,14 @@ pkgs.rustPlatform.buildRustPackage {
   version = "0.1.0";
   src = ./.;
   cargoLock.lockFile = ./Cargo.lock;
+  nativeBuildInputs = [
+    pkgs.scdoc
+    pkgs.installShellFiles
+  ];
+  postInstall = ''
+    scdoc < dir2json.1.scd > dir2json.1
+    installManPage dir2json.1
+  '';
 
   meta = {
     description = "Tool that converts directory trees to JSON objects";

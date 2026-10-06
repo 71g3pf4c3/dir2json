@@ -194,6 +194,61 @@ fn is_executable(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+/// A single mismatch between a desired tree and an observed tree, as
+/// reported by [`diff_trees`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mismatch {
+    /// Path of the mismatching entry, segments joined by `/`.
+    pub path: String,
+    /// The expected value. `None` if the entry is missing in the desired
+    /// tree (i.e. it exists on disk but was not asked for).
+    pub expected: Option<Value>,
+    /// The observed value. `None` if the entry is missing on disk (i.e. it
+    /// was asked for but does not exist).
+    pub actual: Option<Value>,
+}
+
+/// Compare a desired tree against an observed tree (typically produced by
+/// [`dir_to_json`]) and return every mismatch, ordered by path.
+///
+/// Both values must be JSON objects; any kind difference (missing entry,
+/// string vs. object, different script contents, ...) is reported as a
+/// single [`Mismatch`] on the longest common prefix.
+pub fn diff_trees(desired: &Value, actual: &Value) -> Vec<Mismatch> {
+    let mut mismatches = Vec::new();
+    diff_at(Some(desired), Some(actual), String::new(), &mut mismatches);
+    mismatches
+}
+
+fn diff_at(
+    desired: Option<&Value>,
+    actual: Option<&Value>,
+    path: String,
+    mismatches: &mut Vec<Mismatch>,
+) {
+    match (desired, actual) {
+        (Some(Value::Object(desired)), Some(Value::Object(actual))) => {
+            let mut names: std::collections::BTreeSet<&str> =
+                desired.keys().map(String::as_str).collect();
+            names.extend(actual.keys().map(String::as_str));
+            for name in names {
+                let child = if path.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{path}/{name}")
+                };
+                diff_at(desired.get(name), actual.get(name), child, mismatches);
+            }
+        }
+        (Some(desired), Some(actual)) if desired == actual => {}
+        (desired, actual) => mismatches.push(Mismatch {
+            path,
+            expected: desired.cloned(),
+            actual: actual.cloned(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +347,61 @@ mod tests {
             dir_to_json(&file, &Options::default()),
             Err(Error::NotADirectory { .. })
         ));
+    }
+
+    #[test]
+    fn diff_trees_empty_for_identical_trees() {
+        let tree = json!({
+            "greeting": "Hello, world!",
+            "dir": { "subfile": "Content.\n", "subdir": {} },
+            "symlink": ["link", "target path"],
+            "script": ["script", "#!/bin/sh\necho Howdy!"],
+        });
+        assert!(diff_trees(&tree, &tree).is_empty());
+    }
+
+    #[test]
+    fn diff_trees_reports_changed_missing_and_extra() {
+        let desired = json!({
+            "a": "old",
+            "b": { "c": "x" },
+            "gone": "keep me",
+            "d": "untouched",
+        });
+        let actual = json!({
+            "a": "new",
+            "b": { "c": "x", "extra": "y" },
+            "d": "untouched",
+            "new": "surprise",
+        });
+
+        let mismatches = diff_trees(&desired, &actual);
+        let paths: Vec<&str> = mismatches.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(paths, ["a", "b/extra", "gone", "new"]);
+
+        let a = &mismatches[0];
+        assert_eq!(a.expected, Some(json!("old")));
+        assert_eq!(a.actual, Some(json!("new")));
+
+        let extra = &mismatches[1];
+        assert_eq!(extra.expected, None);
+        assert_eq!(extra.actual, Some(json!("y")));
+
+        let gone = &mismatches[2];
+        assert_eq!(gone.expected, Some(json!("keep me")));
+        assert_eq!(gone.actual, None);
+    }
+
+    #[test]
+    fn diff_trees_reports_kind_mismatches() {
+        let desired = json!({ "x": { "y": "z" }, "s": ["script", "a"] });
+        let actual = json!({ "x": "plain file", "s": "not executable" });
+
+        let mismatches = diff_trees(&desired, &actual);
+        let paths: Vec<&str> = mismatches.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(paths, ["s", "x"]);
+        assert_eq!(mismatches[0].expected, Some(json!(["script", "a"])));
+        assert_eq!(mismatches[0].actual, Some(json!("not executable")));
     }
 
     #[cfg(unix)]

@@ -53,12 +53,12 @@ moment you need to know what is *actually* on disk, you are on your own.
   of `diff -r` output or tarballs. `json2dir` alone can only ever give you
   the first write of a tree; it has no way to capture one that already
   exists.
-- **Drift detection.** The JSON document is your desired state;
-  `dir2json`'s output is the observed state. `diff` them (or compare them
-  in a script using the exit codes) and you have a machine-checkable
-  conformance test: "does this machine match the tree it was supposed to
-  get?" This is exactly the pattern configuration management is built on,
-  now available for anything expressible as files.
+- **Drift detection, built in.** The JSON document is your desired state;
+  `dir2json`'s output is the observed state. `dir2json --check desired.json
+  /etc/mytree` compares the two, prints a path-level mismatch report and
+  exits 3 — a machine-checkable conformance test in a single command, no
+  `diff` plumbing required. This is exactly the pattern configuration
+  management is built on, now available for anything expressible as files.
 - **Roundtrip verification.** `dir2json | json2dir` gives you a closed
   loop: apply, re-read, compare. If you manage trees with `json2dir`, you
   can finally *prove* the materialization succeeded instead of trusting it.
@@ -118,19 +118,31 @@ Options:
   -c, --compact         Compact output instead of pretty-printed
   -s, --skip-special    Skip special files (FIFOs, sockets, devices) with a
                         warning instead of failing
+      --check FILE      Compare DIR against the desired tree in FILE (a JSON
+                        object, "-" for stdin) instead of printing; exits 3
+                        with a mismatch report on drift
   -h, --help            Print help
   -V, --version         Print version
 ```
 
-Exit codes: `0` on success, `1` on conversion errors, `2` on usage errors —
-so CI pipelines can tell "the tree is bad" apart from "the command line is
-bad".
+Exit status: `0` on success (or a matching `--check`), `1` on conversion
+errors, `2` on usage errors, `3` on drift — so CI pipelines can tell "the
+tree is bad", "the command line is bad" and "the machine drifted" apart.
 
-A drift check is one line of shell:
+A drift check is a single command:
 
-```sh
-dir2json -c /etc/mytree | diff -u desired.json - || echo "DRIFT DETECTED"
 ```
+$ dir2json --check desired.json /etc/mytree
+drift detected: 2 mismatches
+  dir/subfile: missing on disk
+  greeting: expected "Hello, world!", got "goodbye"
+$ echo $?
+3
+```
+
+Or drive it from a pipeline — `dir2json -c . | dir2json --check - .`
+re-asserts a tree against itself (and always passes, but now you know the
+plumbing works).
 
 ## Installing
 
@@ -151,9 +163,12 @@ nix profile install github:71g3pf4c3/dir2json
 `cargo build`, `cargo test`, or `nix build`. A `devShell` with the Rust
 toolchain is provided: `nix develop`.
 
-The test suite includes a roundtrip test that materializes a tree the way
+The test suite covers three layers: unit tests for the tree walker and the
+drift differ, integration tests for the CLI (exit codes, `--check` report
+format, stdin mode), and a roundtrip test that materializes a tree the way
 `json2dir` does and asserts that `dir2json` reproduces the original JSON
-exactly.
+exactly. CI runs `cargo fmt --check`, `cargo clippy -D warnings`, `cargo
+test` and `nix flake check` on every push.
 
 ## License
 
