@@ -1,0 +1,16 @@
+[package]
+name = "dir2json"
+version = "0.1.0"
+edition = "2024"
+description = "Tool that converts directory trees to JSON objects"
+repository = "https://github.com/71g3pf4c3/dir2json"
+license = "GPL-3.0-or-later"
+categories = ["command-line-utilities", "config", "encoding", "filesystem"]
+keywords = ["json"]
+
+[dependencies]
+serde_json = "1.0.141"
+thiserror = "2.0.12"
+
+[dev-dependencies]
+tempfile = "3.20.0"
