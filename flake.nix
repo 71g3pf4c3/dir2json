@@ -33,16 +33,16 @@
         });
       });
 
-      devShells = forAllSystems (pkgs: pkgs.mkShell {
-        packages = with pkgs; [
-          cargo
-          rustc
-          rustfmt
-          clippy
-          rust-analyzer
-        ];
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
+          packages = with pkgs; [
+            cargo
+            rustc
+            rustfmt
+            clippy
+            rust-analyzer
+          ];
+        };
       });
-
-      formatter = forAllSystems (pkgs: pkgs.nixfmt-rfc-style);
     };
 }
